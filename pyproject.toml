@@ -1,0 +1,12 @@
+[tool.poetry]
+name = "website-data-collection-engine"
+version = "0.1.0"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.12"
+playwright = "^1.52.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
