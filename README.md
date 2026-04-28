@@ -8,21 +8,11 @@ energy‑intensity models, eco-webpage-analytics gives developers instant insigh
 ## 1. Install Python
 Install **Python 3.11.x**
 
-Check:
-```bash
-python --version
-```
-
 ## 2. Install Poetry
 
 ### Windows (PowerShell)
 ```powershell
 (Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | python -
-```
-
-Check:
-```bash
-poetry --version
 ```
 
 ## 3. Install Dependencies
@@ -39,15 +29,15 @@ poetry run playwright install chromium
 
 ## One Website
 ```bash
-poetry run python website_data_collection_engine.py https://example.com
+poetry run python website_data_collection_engine.py https://google.com
 ```
 
 ## Multiple Websites
 ```bash
-poetry run python website_data_collection_engine.py https://example.com https://openai.com
+poetry run python website_data_collection_engine.py https://google.com https://openai.com https://github.com 
 ```
 
 ## Save Output
 ```bash
-poetry run python website_data_collection_engine.py https://example.com --output-file result.json
+poetry run python website_data_collection_engine.py https://google.com --output-file result.json
 ```
