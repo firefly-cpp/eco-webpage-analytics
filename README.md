@@ -11,6 +11,7 @@ The application analyzes a given URL, collects resource and performance metrics,
 ```txt
 frontend/   → Vue.js dashboard application
 backend/    → Python FastAPI backend
+```
 
 ---
 
