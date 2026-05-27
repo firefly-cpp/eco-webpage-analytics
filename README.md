@@ -1,95 +1,122 @@
-# eco-webpage-analytics 🌱
+# Eco Webpage Analytics 🌱
 
-This is a lightweight, framework‑agnostic library that estimates the carbon footprint of any web page. By combining network‑request data, page‑size metrics, and up‑to‑date
-energy‑intensity models, eco-webpage-analytics gives developers instant insight into the environmental impact of their digital products.
+Eco Webpage Analytics is a simple web application for analyzing website performance and estimating the carbon footprint of web pages.
 
-# Quick Setup
+The application analyzes a given URL, collects resource and performance metrics, estimates CO₂ emissions per visit, and displays optimization recommendations in a dashboard interface.
 
-## 1. Install Python
-Install **Python 3.11.x**
+---
 
-## 2. Install Poetry
+# Project Structure
 
-### Windows (PowerShell)
-```powershell
-(Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | python -
-```
+```txt
+frontend/   → Vue.js dashboard application
+backend/    → Python FastAPI backend
 
-## 3. Install Dependencies
+---
+
+# Technologies
+
+## Frontend
+- Vue.js
+- Chart.js
+- Node.js
+
+## Backend
+- Python 3.11+
+- FastAPI
+- Playwright
+
+---
+
+# Prerequisites
+
+Before running the project, make sure you have installed:
+
+- Node.js + npm
+- Python 3.11+
+- Git
+
+
+---
+
+# Run Frontend
+
+Open terminal inside the `frontend` folder:
+
 ```bash
-poetry install
+cd frontend
 ```
 
-## 4. Install Playwright Browser
+Install frontend dependencies:
+
 ```bash
-poetry run playwright install chromium
+npm install
 ```
 
-# Run Website Data Collection Engine
+Start the Vue development server:
 
-## One Website
-
-### Command
 ```bash
-poetry run python website_data_collection_engine.py https://google.com
+npm run serve
 ```
 
-### Output
-```json
-[
-  {
-    "url": "https://google.com",
-    "total_bytes": 768351,
-    "requests": 35,
-    "images_bytes": 1024,
-    "js_bytes": 674936,
-    "css_bytes": 3678,
-    "load_time": 3.569
-  }
-]
+Frontend runs on:
+
+```txt
+http://localhost:8080
 ```
 
-## Multiple Websites
+---
 
-### Command
+# Run Backend
+
+Open terminal inside the `backend` folder:
+
 ```bash
-poetry run python website_data_collection_engine.py https://google.com https://openai.com https://github.com
+cd backend
 ```
 
-### Output
-```json
-[
-  {
-    "url": "https://google.com",
-    "total_bytes": 770229,
-    "requests": 34,
-    "images_bytes": 990,
-    "js_bytes": 674985,
-    "css_bytes": 3678,
-    "load_time": 0.577
-  },
-  {
-    "url": "https://openai.com",
-    "total_bytes": 221796,
-    "requests": 15,
-    "images_bytes": 5867,
-    "js_bytes": 83465,
-    "css_bytes": 0,
-    "load_time": 0.625
-  },
-  {
-    "url": "https://github.com",
-    "total_bytes": 5570887,
-    "requests": 141,
-    "images_bytes": 1284246,
-    "js_bytes": 1706617,
-    "css_bytes": 282436,
-    "load_time": 0.632
-  }
-]
-```
+Create virtual environment:
 
-## Save Output
 ```bash
-poetry run python website_data_collection_engine.py https://google.com --output-file result.json
+python3 -m venv .venv
 ```
+
+Activate virtual environment:
+
+### Linux / macOS
+
+```bash
+source .venv/bin/activate
+```
+
+### Windows
+
+```bash
+.venv\Scripts\activate
+```
+
+Install backend dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Install Playwright Chromium browser:
+
+```bash
+playwright install chromium
+```
+
+Start FastAPI backend server:
+
+```bash
+uvicorn app:app --reload
+```
+
+Backend runs on:
+
+```txt
+http://127.0.0.1:8000
+```
+
+

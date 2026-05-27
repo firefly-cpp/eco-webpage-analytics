@@ -34,16 +34,29 @@
 
     <section v-if="result" class="results">
       <div class="score-card">
-        <div>
-          <p class="card-label">Carbon Rating</p>
+        <div class="rating-top">
+          <div class="rating-current">
+            <p class="card-label">Carbon Rating</p>
+            <div class="rating-value">{{ result.rating }}</div>
+          </div>
 
-          <h2 v-if="result.rating">
-            {{ result.rating }}
-          </h2>
+          <div class="rating-info">
+            <p>This rating reflects the estimated carbon emissions per visit.</p>
+            <p>Lower emissions mean a better rating.</p>
+          </div>
+        </div>
 
-          <h3 v-else class="todo-text">
-            TODO: Rating will be displayed after carbon estimation engine integration.
-          </h3>
+        <div class="rating-scale">
+          <div
+              v-for="item in ratingScale"
+              :key="item.grade"
+              class="rating-item"
+              :class="{ active: result.rating === item.grade }"
+          >
+            <strong>{{ item.grade }}</strong>
+            <span>{{ item.range }}</span>
+            <small>{{ item.label }}</small>
+          </div>
         </div>
       </div>
 
@@ -51,25 +64,19 @@
         <div class="metric-card">
           <p>CO₂ per visit</p>
 
-          <h3 v-if="result.co2_per_visit">
+          <h3>
             {{ result.co2_per_visit }}g
           </h3>
 
-          <small v-else class="todo-text">
-            TODO: Waiting for carbon estimation module
-          </small>
         </div>
 
         <div class="metric-card">
           <p>CO₂ per 1000 visits</p>
 
-          <h3 v-if="result.co2_per_1000_visits">
+          <h3>
             {{ result.co2_per_1000_visits }}g
           </h3>
 
-          <small v-else class="todo-text">
-            TODO: Waiting for carbon estimation module
-          </small>
         </div>
 
         <div class="metric-card">
@@ -192,39 +199,59 @@ export default {
       ]
     },
 
+    ratingScale() {
+      return [
+        { grade: "A", range: "< 0.05g", label: "Very low emissions" },
+        { grade: "B", range: "0.05 – 0.10g", label: "Low emissions" },
+        { grade: "C", range: "0.10 – 0.20g", label: "Moderate emissions" },
+        { grade: "D", range: "0.20 – 0.30g", label: "High emissions" },
+        { grade: "E", range: "0.30 – 0.40g", label: "Very high emissions" },
+        { grade: "F", range: "> 0.40g", label: "Extremely high emissions" },
+      ]
+    },
+
     recommendations() {
       if (!this.result) {
         return []
       }
 
       const items = []
+      const total = this.result.total_bytes || 1
 
-      if (this.result.images_bytes > this.result.total_bytes * 0.5) {
-        items.push("Images are the largest contributor. Compress images or use WebP/AVIF formats.")
+      const imageShare = this.result.images_bytes / total
+      const jsShare = this.result.js_bytes / total
+      const cssShare = this.result.css_bytes / total
+
+      if (imageShare > 0.5) {
+        items.push("Images make up more than 50% of the page size. Compress images and consider WebP or AVIF formats.")
       }
 
-      if (this.result.js_bytes > this.result.total_bytes * 0.3) {
-        items.push("JavaScript size is high. Consider minification, lazy loading, or code splitting.")
+      if (jsShare > 0.3) {
+        items.push("JavaScript is a large part of the page size. Minify scripts, remove unused code, or use lazy loading.")
       }
 
-      if (this.result.css_bytes > this.result.total_bytes * 0.15) {
-        items.push("CSS size is high. Remove unused CSS and minify stylesheets.")
+      if (cssShare > 0.15) {
+        items.push("CSS size is relatively high. Remove unused styles and minify CSS files.")
       }
 
       if (this.result.requests > 80) {
-        items.push("The page makes many HTTP requests. Consider bundling assets and reducing third-party scripts.")
+        items.push("The page sends many HTTP requests. Reduce third-party scripts and bundle smaller assets where possible.")
       }
 
       if (this.result.load_time > 3) {
-        items.push("Load time is high. Optimize critical resources and improve server response time.")
+        items.push("Load time is above 3 seconds. Optimize critical resources and improve server response time.")
+      }
+
+      if (this.result.co2_per_visit > 0.4) {
+        items.push("Estimated CO₂ per visit is high. Reducing page weight and load time should lower the footprint.")
       }
 
       if (items.length === 0) {
-        items.push("This page looks well optimized based on the available metrics.")
+        items.push("The page looks reasonably optimized based on the collected metrics.")
       }
 
       return items
-    },
+    }
   },
 
   methods: {
@@ -346,21 +373,6 @@ export default {
   text-align: center;
 }
 
-.label {
-  margin: 0 0 8px;
-  font-size: 14px;
-  font-weight: 700;
-  color: #2f855a;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-h1 {
-  margin: 0;
-  font-size: 42px;
-  line-height: 1.1;
-}
-
 .main-title {
   margin: 0;
   font-size: 42px;
@@ -422,28 +434,31 @@ h1 {
 }
 
 .score-card {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
   padding: 28px;
   margin-bottom: 20px;
 }
 
+.rating-top {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  margin-bottom: 22px;
+}
+
+.rating-current {
+  min-width: 120px;
+}
+
 .card-label {
-  margin: 0;
+  margin: 0 0 8px;
   color: #6b7280;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .score-card h2 {
   margin: 4px 0 0;
   font-size: 56px;
   color: #2f855a;
-}
-
-.analyzed-url {
-  color: #5b6773;
-  word-break: break-all;
 }
 
 .metrics-grid {
@@ -533,12 +548,6 @@ h1 {
   cursor: not-allowed;
 }
 
-.todo-text {
-  color: #98b3ea;
-  font-weight: 500;
-  line-height: 1.4;
-}
-
 .spinner {
   width: 14px;
   height: 14px;
@@ -553,6 +562,97 @@ h1 {
 
 .chart-container {
   margin-top: 32px;
+}
+
+.rating-value {
+  font-size: 64px;
+  font-weight: 800;
+  color: #2f855a;
+  line-height: 1;
+}
+
+.rating-info {
+  padding-left: 28px;
+  border-left: 1px solid #e5e7eb;
+  color: #374151;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.rating-info p {
+  margin: 0 0 4px;
+}
+
+.rating-scale {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.rating-item {
+  padding: 16px 10px;
+  text-align: center;
+  border-right: 1px solid #e5e7eb;
+}
+
+.rating-item:last-child {
+  border-right: none;
+}
+
+.rating-item.active {
+  background: #eaf7ef;
+}
+
+.rating-item strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 10px;
+  border-radius: 50%;
+  color: white;
+  font-size: 18px;
+}
+
+.rating-item:nth-child(1) strong {
+  background: #2f855a;
+}
+
+.rating-item:nth-child(2) strong {
+  background: #48bb78;
+}
+
+.rating-item:nth-child(3) strong {
+  background: #ecc94b;
+}
+
+.rating-item:nth-child(4) strong {
+  background: #ed8936;
+}
+
+.rating-item:nth-child(5) strong {
+  background: #f56565;
+}
+
+.rating-item:nth-child(6) strong {
+  background: #e53e3e;
+}
+
+.rating-item span {
+  display: block;
+  margin-bottom: 8px;
+  color: #374151;
+  font-size: 14px;
+}
+
+.rating-item small {
+  display: block;
+  color: #374151;
+  font-size: 13px;
+  line-height: 1.3;
 }
 
 @keyframes spin {
@@ -575,6 +675,20 @@ h1 {
 
   .main-title {
     font-size: 32px;
+  }
+
+  .rating-top {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .rating-info {
+    padding-left: 0;
+    border-left: none;
+  }
+
+  .rating-scale {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 </style>

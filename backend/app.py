@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from website_data_collection_engine import WebsiteMeasurementEngine
+from carbon_footprint_estimation_engine import calculate_co2
 
 app = FastAPI()
 
@@ -24,12 +25,18 @@ class AnalyzeRequest(BaseModel):
 
 @app.post("/api/analyze")
 def analyze(data: AnalyzeRequest):
-
     engine = WebsiteMeasurementEngine()
 
-    result = engine.measure_urls(
+    measurement_result = engine.measure_urls(
         [data.url],
         repeat_runs=1
     )
 
-    return result[0]
+    measurement = measurement_result[0]
+
+    carbon_result = calculate_co2(measurement)
+
+    return {
+        **measurement,
+        **carbon_result
+    }
