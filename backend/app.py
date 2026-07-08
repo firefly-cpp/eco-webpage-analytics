@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -18,6 +18,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+engine = WebsiteMeasurementEngine()
 
 class AnalyzeRequest(BaseModel):
     url: str
@@ -25,14 +26,12 @@ class AnalyzeRequest(BaseModel):
 
 @app.post("/api/analyze")
 def analyze(data: AnalyzeRequest):
-    engine = WebsiteMeasurementEngine()
-
-    measurement_result = engine.measure_urls(
-        [data.url],
-        repeat_runs=1
-    )
-
-    measurement = measurement_result[0]
+    try:
+        measurement = engine.measure_url(data.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     carbon_result = calculate_co2(measurement)
 
