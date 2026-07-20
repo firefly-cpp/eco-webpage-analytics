@@ -45,7 +45,15 @@
         <div class="rating-top">
           <div class="rating-current">
             <p class="card-label">Carbon Rating</p>
-            <div class="rating-value">{{ result.rating }}</div>
+            <div
+            class="rating-value"
+            :style="{
+              color: ratingColor(result.rating),
+              textShadow: `0 0 18px ${ratingColor(result.rating)}88`
+            }"
+          >
+            {{ result.rating }}
+          </div>
           </div>
 
           <div class="rating-info">
@@ -60,6 +68,13 @@
               :key="item.grade"
               class="rating-item"
               :class="{ active: result.rating === item.grade }"
+              :style="result.rating === item.grade
+                ? {
+                    borderColor: ratingColor(item.grade),
+                    boxShadow: `0 0 25px ${ratingColor(item.grade)}66`,
+                    background: `linear-gradient(180deg, ${ratingColor(item.grade)}33, ${ratingColor(item.grade)}11)`
+                  }
+                : {}"
           >
             <strong>{{ item.grade }}</strong>
             <span>{{ item.range }}</span>
@@ -69,7 +84,7 @@
       </div>
 
       <div class="metrics-grid">
-        <div class="metric-card">
+        <div class="metric-card" :style="metricCardStyle('co2')">
           <p>CO₂ per visit</p>
 
           <h3>
@@ -78,7 +93,7 @@
 
         </div>
 
-        <div class="metric-card">
+        <div class="metric-card" :style="metricCardStyle('co2')">
           <p>CO₂ per 1000 visits</p>
 
           <h3>
@@ -87,17 +102,17 @@
 
         </div>
 
-        <div class="metric-card">
+        <div class="metric-card" :style="metricCardStyle('pageSize')">
           <p>Total page size</p>
           <h3>{{ formatBytes(result.total_bytes) }}</h3>
         </div>
 
-        <div class="metric-card">
+        <div class="metric-card" :style="metricCardStyle('requests')">
           <p>Requests</p>
           <h3>{{ result.requests }}</h3>
         </div>
 
-        <div class="metric-card">
+        <div class="metric-card" :style="metricCardStyle('loadTime')">
           <p>Load time</p>
           <h3>{{ result.load_time }}s</h3>
         </div>
@@ -114,14 +129,19 @@
           >
             <div class="breakdown-header">
               <span>{{ item.name }}</span>
-              <strong>{{ item.percentage }}%</strong>
+              <strong :style="{ color: resourceColor(item) }">
+              {{ item.percentage }}%
+            </strong>
             </div>
 
             <div class="progress">
               <div
-                  class="progress-fill"
-                  :style="{ width: item.percentage + '%' }"
-              ></div>
+                class="progress-fill"
+                :style="{
+                  width: item.percentage + '%',
+                  background: `linear-gradient(90deg, ${resourceColor(item)}, ${resourceColor(item)}aa)`
+                }"
+            ></div>
             </div>
 
             <small>{{ formatBytes(item.bytes) }}</small>
@@ -209,12 +229,13 @@ export default {
 
     ratingScale() {
       return [
-        { grade: "A", range: "< 0.05g", label: "Very low emissions" },
-        { grade: "B", range: "0.05 – 0.10g", label: "Low emissions" },
-        { grade: "C", range: "0.10 – 0.20g", label: "Moderate emissions" },
-        { grade: "D", range: "0.20 – 0.30g", label: "High emissions" },
-        { grade: "E", range: "0.30 – 0.40g", label: "Very high emissions" },
-        { grade: "F", range: "> 0.40g", label: "Extremely high emissions" },
+        { grade: "A+", range: "≤ 0.040g", label: "Best performance" },
+        { grade: "A", range: "0.041 – 0.079g", label: "Very low emissions" },
+        { grade: "B", range: "0.080 – 0.145g", label: "Low emissions" },
+        { grade: "C", range: "0.146 – 0.209g", label: "Moderate emissions" },
+        { grade: "D", range: "0.210 – 0.278g", label: "High emissions" },
+        { grade: "E", range: "0.279 – 0.359g", label: "Very high emissions" },
+        { grade: "F", range: "> 0.359g", label: "Extremely high emissions" },
       ]
     },
 
@@ -226,19 +247,23 @@ export default {
       const items = []
       const total = this.result.total_bytes || 1
 
+      const imageBytes = this.result.images_bytes || 0
+      const jsBytes = this.result.js_bytes || 0
+      const cssBytes = this.result.css_bytes || 0
+
       const imageShare = this.result.images_bytes / total
       const jsShare = this.result.js_bytes / total
       const cssShare = this.result.css_bytes / total
 
-      if (imageShare > 0.5) {
-        items.push("Images make up more than 50% of the page size. Compress images and consider WebP or AVIF formats.")
+      if (imageBytes > this.mb(1.5) || (imageShare > 0.5 && imageBytes > this.kb(500))) {
+        items.push("Images are a large part of the page size. Compress images and consider WebP or AVIF formats.")
       }
 
-      if (jsShare > 0.3) {
+      if (jsBytes > this.mb(1) || (jsShare > 0.4 && jsBytes > this.kb(300))) {
         items.push("JavaScript is a large part of the page size. Minify scripts, remove unused code, or use lazy loading.")
       }
 
-      if (cssShare > 0.15) {
+      if (cssBytes > this.kb(250) || (cssShare > 0.2 && cssBytes > this.kb(120))) {
         items.push("CSS size is relatively high. Remove unused styles and minify CSS files.")
       }
 
@@ -250,7 +275,7 @@ export default {
         items.push("Load time is above 3 seconds. Optimize critical resources and improve server response time.")
       }
 
-      if (this.result.co2_per_visit > 0.4) {
+      if (this.result.co2_per_visit > 0.359) {
         items.push("Estimated CO₂ per visit is high. Reducing page weight and load time should lower the footprint.")
       }
 
@@ -284,12 +309,7 @@ export default {
             {
               data: this.breakdown.map(item => item.bytes),
 
-              backgroundColor: [
-                "#22c55e", // Images
-                "#4ade80", // JavaScript
-                "#86efac", // CSS
-                "#334155", // Other
-              ],
+              backgroundColor: this.breakdown.map(item => this.resourceColor(item)),
 
               borderColor: "#1e293b",
               borderWidth: 3,
@@ -379,6 +399,128 @@ export default {
       } finally {
         this.loading = false
       }
+    },
+
+    ratingColor(rating) {
+      const colors = {
+        "A+": "#2f855a",
+        A: "#16a34a",
+        B: "#22c55e",
+        C: "#84cc16",
+        D: "#f59e0b",
+        E: "#f97316",
+        F: "#ef4444",
+      }
+
+      return colors[rating] || "#22c55e"
+    },
+
+    metricColor(metric) {
+      if (!this.result) {
+        return "#22c55e"
+      }
+
+      if (metric === "co2") {
+        return this.ratingColor(this.result.rating)
+      }
+
+      if (metric === "pageSize") {
+        const mb = (this.result.total_bytes || 0) / 1024 / 1024
+
+        if (mb <= 2) return "#22c55e"
+        if (mb <= 5) return "#84cc16"
+        if (mb <= 8) return "#f59e0b"
+        return "#ef4444"
+      }
+
+      if (metric === "requests") {
+        const requests = this.result.requests || 0
+
+        if (requests <= 80) return "#22c55e"
+        if (requests <= 150) return "#84cc16"
+        if (requests <= 300) return "#f59e0b"
+        return "#ef4444"
+      }
+
+      if (metric === "loadTime") {
+        const loadTime = this.result.load_time || 0
+
+        if (loadTime <= 3) return "#22c55e"
+        if (loadTime <= 5) return "#84cc16"
+        if (loadTime <= 8) return "#f59e0b"
+        return "#ef4444"
+      }
+
+      return "#22c55e"
+    },
+
+    kb(value) {
+      return value * 1024
+    },
+
+    mb(value) {
+      return value * 1024 * 1024
+    },
+
+    metricCardStyle(metric) {
+      const color = this.metricColor(metric)
+
+      return {
+        "--metric-color": color,
+        "--metric-color-soft": `${color}88`,
+        borderColor: `${color}55`,
+      }
+    },
+
+    resourceColor(item) {
+      const bytes = item.bytes || 0
+      const percentage = item.percentage || 0
+
+      if (item.name === "Images") {
+        if (bytes > this.mb(1.5) || (percentage > 50 && bytes > this.kb(500))) {
+          return "#ef4444"
+        }
+
+        if (bytes > this.kb(750) || (percentage > 35 && bytes > this.kb(250))) {
+          return "#f59e0b"
+        }
+
+        return "#22c55e"
+      }
+
+      if (item.name === "JavaScript") {
+        if (bytes > this.mb(1) || (percentage > 40 && bytes > this.kb(300))) {
+          return "#ef4444"
+        }
+
+        if (bytes > this.kb(500) || (percentage > 25 && bytes > this.kb(150))) {
+          return "#f59e0b"
+        }
+
+        return "#22c55e"
+      }
+
+      if (item.name === "CSS") {
+        if (bytes > this.kb(250) || (percentage > 20 && bytes > this.kb(120))) {
+          return "#ef4444"
+        }
+
+        if (bytes > this.kb(150) || (percentage > 12 && bytes > this.kb(80))) {
+          return "#f59e0b"
+        }
+
+        return "#22c55e"
+      }
+
+      if (item.name === "Other") {
+        if (bytes > this.mb(1.5) || (percentage > 50 && bytes > this.kb(750))) {
+          return "#f59e0b"
+        }
+
+        return "#64748b"
+      }
+
+      return "#22c55e"
     },
 
     formatBytes(bytes) {
@@ -571,8 +713,6 @@ export default {
   font-size: 72px;
   font-weight: 800;
   line-height: 1;
-  color: #4ade80;
-  text-shadow: 0 0 18px rgba(74, 222, 128, 0.45);
 }
 
 .rating-info {
@@ -592,7 +732,7 @@ export default {
 
 .rating-scale {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -611,9 +751,7 @@ export default {
 }
 
 .rating-item.active {
-  background: linear-gradient(180deg, #1d3d30, #173326);
-  border-color: #22c55e;
-  box-shadow: 0 0 25px rgba(34, 197, 94, 0.25);
+  transform: translateY(-3px);
 }
 
 .rating-item strong {
@@ -629,26 +767,30 @@ export default {
 }
 
 .rating-item:nth-child(1) strong {
-  background: #16a34a;
+  background: #2f855a; /* A+ */
 }
 
 .rating-item:nth-child(2) strong {
-  background: #22c55e;
+  background: #16a34a;
 }
 
 .rating-item:nth-child(3) strong {
-  background: #84cc16;
+  background: #22c55e;
 }
 
 .rating-item:nth-child(4) strong {
-  background: #f59e0b;
+  background: #84cc16;
 }
 
 .rating-item:nth-child(5) strong {
-  background: #f97316;
+  background: #f59e0b;
 }
 
 .rating-item:nth-child(6) strong {
+  background: #f97316;
+}
+
+.rating-item:nth-child(7) strong {
   background: #ef4444;
 }
 
@@ -686,7 +828,7 @@ export default {
 
 .metric-card:hover {
   transform: translateY(-5px);
-  border-color: rgba(34, 197, 94, 0.45);
+  border-color: var(--metric-color, #22c55e);
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
 }
 
@@ -697,7 +839,11 @@ export default {
   left: 0;
   width: 100%;
   height: 4px;
-  background: linear-gradient(90deg, #22c55e, #4ade80);
+  background: linear-gradient(
+      90deg,
+      var(--metric-color, #22c55e),
+      var(--metric-color-soft, #4ade80)
+  );
 }
 
 .metric-card p {

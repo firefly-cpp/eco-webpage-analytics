@@ -3,26 +3,47 @@ import json
 import sys
 from pathlib import Path
 
-#customer premise equipment (modem, router, ...)
+# customer premise equipment (modem, router, ...)
+# Unit: kWh/hour
 cpe_kwh_per_h = 0.007
-#access network that connects users and ISP
-an_kwh_per_h = 0.0028
-#electricity consumed transmitting 1 gigabyte  of data through the core network at the access network node
-core_network_ann_per_gb = 0.01771684761728*0.5
-#electricity consumed transmitting 1 gigabyte  of data through the core network at the data centers node
-#values are split up into regions but summed up here to get the total
-core_network_dcn_per_gb = 0.00885842380864
-core_network_total = core_network_ann_per_gb + core_network_dcn_per_gb
-#data center electricity usage trasmitting 1 gigabyte of data
-#data is again split up but summed up to get the total
-dc_kwh_per_gb = 0.04107
 
-#user device energy consumption, here the value is from a laptop
+# access network that connects users and ISP
+# Unit: kWh/hour
+an_kwh_per_h = 0.0028
+
+# SWDM v4 operational network energy intensity
+# Unit: kWh/GB
+core_network_ann_per_gb = 0.059
+
+# SWDM v4 embodied network energy intensity
+# Unit: kWh/GB
+core_network_dcn_per_gb = 0.013
+
+# total network energy intensity
+# Unit: kWh/GB
+core_network_total = core_network_ann_per_gb + core_network_dcn_per_gb
+
+# SWDM v4 total data-centre energy intensity:
+# operational data-centre energy: 0.055 kWh/GB
+# embodied data-centre energy:    0.012 kWh/GB
+# Unit: kWh/GB
+dc_kwh_per_gb = 0.055 + 0.012
+
+# user device energy consumption, here the value is from a laptop
+# Unit: kWh/hour
 device_kwh_per_h = 0.0242
 
-#grams of co2 emitted to produce 1 kwh
-#depends on region and energy sources, for now we just use this as a placeholder, maybe make it chooseable in the GUI
-carbon_intensity = 400
+# SWDM v4 total user-device energy intensity:
+# operational user-device energy: 0.080 kWh/GB
+# embodied user-device energy:    0.081 kWh/GB
+# Unit: kWh/GB
+user_device_kwh_per_gb = 0.080 + 0.081
+
+# grams of CO2e emitted to produce 1 kWh
+# SWDM v4 default global average grid intensity
+# Unit: gCO2e/kWh
+carbon_intensity = 494
+
 
 def read_json_file(file_path):
     with open(file_path, "r", encoding="utf-8") as file:
@@ -64,17 +85,19 @@ def get_arguments():
 
     return parser.parse_args()
 
-#rate website on a scale of A-F, the values need some tweaking
+#rate website on a scale of A+ to F, using the Digital Carbon Rating scale
 def get_rating(co2_per_visit):
-    if co2_per_visit <= 0.05:
+    if co2_per_visit <= 0.040:
+        return "A+"
+    elif co2_per_visit <= 0.079:
         return "A"
-    elif co2_per_visit <= 0.10:
+    elif co2_per_visit <= 0.145:
         return "B"
-    elif co2_per_visit <= 0.20:
+    elif co2_per_visit <= 0.209:
         return "C"
-    elif co2_per_visit <= 0.30:
+    elif co2_per_visit <= 0.278:
         return "D"
-    elif co2_per_visit <= 0.40:
+    elif co2_per_visit <= 0.359:
         return "E"
     else:
         return "F"
@@ -86,14 +109,14 @@ def calculate_co2(entry):
     total_bytes_in_gb = total_bytes / 1000000000
     load_time_in_hours = load_time / 3600
 
-    data_energy = total_bytes_in_gb * (dc_kwh_per_gb + core_network_total)
+    data_energy = total_bytes_in_gb * (dc_kwh_per_gb + core_network_total + user_device_kwh_per_gb)
 
     time_energy = load_time_in_hours * (cpe_kwh_per_h + an_kwh_per_h + device_kwh_per_h)
 
     energy_total = data_energy + time_energy
 
     co2_per_visit = round(energy_total * carbon_intensity, 4)
-    co2_per_1000_visits = co2_per_visit * 1000
+    co2_per_1000_visits = round(co2_per_visit * 1000, 1)
     rating = get_rating(co2_per_visit)
 
     result = {
