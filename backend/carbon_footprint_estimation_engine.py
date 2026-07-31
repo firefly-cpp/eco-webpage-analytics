@@ -3,14 +3,6 @@ import json
 import sys
 from pathlib import Path
 
-# customer premise equipment (modem, router, ...)
-# Unit: kWh/hour
-cpe_kwh_per_h = 0.007
-
-# access network that connects users and ISP
-# Unit: kWh/hour
-an_kwh_per_h = 0.0028
-
 # SWDM v4 operational network energy intensity
 # Unit: kWh/GB
 core_network_ann_per_gb = 0.059
@@ -29,15 +21,15 @@ core_network_total = core_network_ann_per_gb + core_network_dcn_per_gb
 # Unit: kWh/GB
 dc_kwh_per_gb = 0.055 + 0.012
 
-# user device energy consumption, here the value is from a laptop
-# Unit: kWh/hour
-device_kwh_per_h = 0.0242
-
 # SWDM v4 total user-device energy intensity:
 # operational user-device energy: 0.080 kWh/GB
 # embodied user-device energy:    0.081 kWh/GB
 # Unit: kWh/GB
 user_device_kwh_per_gb = 0.080 + 0.081
+
+# byte-to-gigabyte conversion used by SWDM v4:
+# Unit: bytes/GB
+bytes_per_gb = 1000000000
 
 # grams of CO2e emitted to produce 1 kWh
 # SWDM v4 default global average grid intensity
@@ -104,25 +96,22 @@ def get_rating(co2_per_visit):
     
 def calculate_co2(entry):
     total_bytes = entry["total_bytes"]
-    load_time = entry["load_time"]
 
-    total_bytes_in_gb = total_bytes / 1000000000
-    load_time_in_hours = load_time / 3600
+    if total_bytes < 0:
+        raise ValueError("total_bytes must be a non-negative number.")
 
-    data_energy = total_bytes_in_gb * (dc_kwh_per_gb + core_network_total + user_device_kwh_per_gb)
+    total_bytes_in_gb = total_bytes / bytes_per_gb
 
-    time_energy = load_time_in_hours * (cpe_kwh_per_h + an_kwh_per_h + device_kwh_per_h)
+    total_energy = total_bytes_in_gb * (dc_kwh_per_gb + core_network_total + user_device_kwh_per_gb)
 
-    energy_total = data_energy + time_energy
-
-    co2_per_visit = round(energy_total * carbon_intensity, 4)
-    co2_per_1000_visits = round(co2_per_visit * 1000, 1)
+    co2_per_visit = total_energy * carbon_intensity
+    co2_per_1000_visits = co2_per_visit * 1000
     rating = get_rating(co2_per_visit)
 
     result = {
         "url": entry["url"],
-        "co2_per_visit": co2_per_visit,
-        "co2_per_1000_visits": co2_per_1000_visits,
+        "co2_per_visit": round(co2_per_visit, 4),
+        "co2_per_1000_visits": round(co2_per_1000_visits, 1),
         "rating": rating
     }
 
