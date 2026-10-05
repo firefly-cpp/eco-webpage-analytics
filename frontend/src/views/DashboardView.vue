@@ -40,7 +40,26 @@
 
     </section>
 
-    <section v-if="result" class="results">
+    <section v-if="currentResult" class="results">
+      <div class="view-switcher">
+        <button :class="{ 
+            active: selectedView === 'baseline' 
+          }" @click="selectView('baseline')">
+          Initial Load
+        </button>
+
+        <button :class="{
+            active: selectedView === 'full_scroll'
+          }" @click="selectView('full_scroll')">
+          Full Scroll
+        </button>
+
+        <button :class="{
+            active: selectedView === 'without_third_party'
+          }" @click="selectView('without_third_party')">
+          Without Third Parties
+        </button>
+      </div>
       <div class="score-card">
         <div class="rating-top">
           <div class="rating-current">
@@ -48,11 +67,11 @@
             <div
             class="rating-value"
             :style="{
-              color: ratingColor(result.rating),
-              textShadow: `0 0 18px ${ratingColor(result.rating)}88`
+              color: ratingColor(currentResult.rating),
+              textShadow: `0 0 18px ${ratingColor(currentResult.rating)}88`
             }"
           >
-            {{ result.rating }}
+            {{ currentResult.rating }}
           </div>
           </div>
 
@@ -67,8 +86,8 @@
               v-for="item in ratingScale"
               :key="item.grade"
               class="rating-item"
-              :class="{ active: result.rating === item.grade }"
-              :style="result.rating === item.grade
+              :class="{ active: currentResult.rating === item.grade }"
+              :style="currentResult.rating === item.grade
                 ? {
                     borderColor: ratingColor(item.grade),
                     boxShadow: `0 0 25px ${ratingColor(item.grade)}66`,
@@ -88,7 +107,7 @@
           <p>CO₂ per visit</p>
 
           <h3>
-            {{ result.co2_per_visit }}g
+            {{ currentResult.co2_per_visit }}g
           </h3>
 
         </div>
@@ -97,24 +116,66 @@
           <p>CO₂ per 1000 visits</p>
 
           <h3>
-            {{ Number(result.co2_per_1000_visits).toFixed(2) }}g
+            {{ Number(currentResult.co2_per_1000_visits).toFixed(2) }}g
           </h3>
 
         </div>
 
         <div class="metric-card" :style="metricCardStyle('pageSize')">
           <p>Total page size</p>
-          <h3>{{ formatBytes(result.total_bytes) }}</h3>
+          <h3>{{ formatBytes(currentResult.total_bytes) }}</h3>
         </div>
 
         <div class="metric-card" :style="metricCardStyle('requests')">
           <p>Requests</p>
-          <h3>{{ result.requests }}</h3>
+          <h3>{{ currentResult.requests }}</h3>
         </div>
 
         <div class="metric-card" :style="metricCardStyle('loadTime')">
           <p>Load time</p>
-          <h3>{{ result.load_time }}s</h3>
+          <h3>{{ currentResult.load_time }}s</h3>
+        </div>
+      </div>
+
+      <div v-if="currentResult.image_transcoding" class="image-counterfactual">
+        <div>
+          <p class="card-label">
+            Image Optimization Counterfactual
+          </p>
+
+          <h2>
+            WebP quality {{ currentResult.image_transcoding.quality }}
+          </h2>
+        </div>
+
+        <div class="counterfactual-values">
+          <div>
+            <span>Current eligible images</span>
+            <strong>
+              {{ formatBytes(currentResult.image_transcoding.original_bytes) }}
+            </strong>
+          </div>
+
+          <div>
+            <span>WebP equivalent</span>
+            <strong>
+              {{ formatBytes(currentResult.image_transcoding.webp_bytes) }}
+            </strong>
+          </div>
+
+          <div>
+            <span>Potential saving</span>
+            <strong>
+              -{{ formatBytes(currentResult.image_transcoding.saved_bytes) }}
+            </strong>
+          </div>
+
+          <div>
+            <span>CO₂ saving / visit</span>
+            <strong>
+              -{{ currentResult.image_transcoding.saved_co2_per_visit }}g
+            </strong>
+          </div>
         </div>
       </div>
 
@@ -178,6 +239,7 @@ export default {
     return {
       url: "",
       result: null,
+      selectedView: "baseline",
       loading: false,
       error: "",
       chart: null,
@@ -185,41 +247,49 @@ export default {
   },
 
   computed: {
+    currentResult() {
+      if (!this.result || !this.result[this.selectedView]) {
+        return null
+      }
+
+      return this.result[this.selectedView]
+    },
+
     breakdown() {
-      if (!this.result) {
+      if (!this.currentResult) {
         return []
       }
 
-      const total = this.result.total_bytes || 1
+      const total = this.currentResult.total_bytes || 1
 
       return [
         {
           name: "Images",
-          bytes: this.result.images_bytes,
-          percentage: Math.round((this.result.images_bytes / total) * 100),
+          bytes: this.currentResult.images_bytes,
+          percentage: Math.round((this.currentResult.images_bytes / total) * 100),
         },
         {
           name: "JavaScript",
-          bytes: this.result.js_bytes,
-          percentage: Math.round((this.result.js_bytes / total) * 100),
+          bytes: this.currentResult.js_bytes,
+          percentage: Math.round((this.currentResult.js_bytes / total) * 100),
         },
         {
           name: "CSS",
-          bytes: this.result.css_bytes,
-          percentage: Math.round((this.result.css_bytes / total) * 100),
+          bytes: this.currentResult.css_bytes,
+          percentage: Math.round((this.currentResult.css_bytes / total) * 100),
         },
         {
           name: "Other",
           bytes:
-              this.result.total_bytes -
-              this.result.images_bytes -
-              this.result.js_bytes -
-              this.result.css_bytes,
+              this.currentResult.total_bytes -
+              this.currentResult.images_bytes -
+              this.currentResult.js_bytes -
+              this.currentResult.css_bytes,
           percentage: Math.round(
-              ((this.result.total_bytes -
-                      this.result.images_bytes -
-                      this.result.js_bytes -
-                      this.result.css_bytes) /
+              ((this.currentResult.total_bytes -
+                      this.currentResult.images_bytes -
+                      this.currentResult.js_bytes -
+                      this.currentResult.css_bytes) /
                   total) *
               100
           ),
@@ -240,20 +310,20 @@ export default {
     },
 
     recommendations() {
-      if (!this.result) {
+      if (!this.currentResult) {
         return []
       }
 
       const items = []
-      const total = this.result.total_bytes || 1
+      const total = this.currentResult.total_bytes || 1
 
-      const imageBytes = this.result.images_bytes || 0
-      const jsBytes = this.result.js_bytes || 0
-      const cssBytes = this.result.css_bytes || 0
+      const imageBytes = this.currentResult.images_bytes || 0
+      const jsBytes = this.currentResult.js_bytes || 0
+      const cssBytes = this.currentResult.css_bytes || 0
 
-      const imageShare = this.result.images_bytes / total
-      const jsShare = this.result.js_bytes / total
-      const cssShare = this.result.css_bytes / total
+      const imageShare = imageBytes / total
+      const jsShare = jsBytes / total
+      const cssShare = cssBytes / total
 
       if (imageBytes > this.mb(1.5) || (imageShare > 0.5 && imageBytes > this.kb(500))) {
         items.push("Images are a large part of the page size. Compress images and consider WebP or AVIF formats.")
@@ -267,15 +337,15 @@ export default {
         items.push("CSS size is relatively high. Remove unused styles and minify CSS files.")
       }
 
-      if (this.result.requests > 80) {
+      if (this.currentResult.requests > 80) {
         items.push("The page sends many HTTP requests. Reduce third-party scripts and bundle smaller assets where possible.")
       }
 
-      if (this.result.load_time > 3) {
+      if (this.currentResult.load_time > 3) {
         items.push("Load time is above 3 seconds. Optimize critical resources and improve server response time.")
       }
 
-      if (this.result.co2_per_visit > 0.359) {
+      if (this.currentResult.co2_per_visit > 0.359) {
         items.push("Estimated CO₂ per visit is high. Reducing page weight and load time should lower the footprint.")
       }
 
@@ -291,9 +361,17 @@ export default {
     saveUrl() {
       localStorage.setItem("saved-url", this.url)
     },
+
+    selectView(view) {
+      this.selectedView = view
+      this.$nextTick(() => {
+        this.renderChart()
+      })
+    },
+
     renderChart() {
 
-      if (!this.result) return
+      if (!this.currentResult) return
 
       if (this.chart) {
         this.chart.destroy()
@@ -375,6 +453,8 @@ export default {
     async analyzeWebsite() {
 
       this.loading = true
+      this.error = ""
+      this.result = null
 
       try {
 
@@ -390,11 +470,24 @@ export default {
           }),
         })
 
-        this.result = await response.json()
+        const data = await response.json()
+
+        if (!response.ok) {
+          throw new Error(
+            data.detail || "The website could not be analyzed."
+          )
+        }
+
+        this.result = data
+        this.selectedView = "baseline"
 
         this.$nextTick(() => {
           this.renderChart()
         })
+
+      } catch (error) {
+        this.error = error.message || "Failed to analyze the website."
+        this.result = null
 
       } finally {
         this.loading = false
@@ -416,16 +509,16 @@ export default {
     },
 
     metricColor(metric) {
-      if (!this.result) {
+      if (!this.currentResult) {
         return "#22c55e"
       }
 
       if (metric === "co2") {
-        return this.ratingColor(this.result.rating)
+        return this.ratingColor(this.currentResult.rating)
       }
 
       if (metric === "pageSize") {
-        const mb = (this.result.total_bytes || 0) / 1024 / 1024
+        const mb = (this.currentResult.total_bytes || 0) / 1024 / 1024
 
         if (mb <= 2) return "#22c55e"
         if (mb <= 5) return "#84cc16"
@@ -434,7 +527,7 @@ export default {
       }
 
       if (metric === "requests") {
-        const requests = this.result.requests || 0
+        const requests = this.currentResult.requests || 0
 
         if (requests <= 80) return "#22c55e"
         if (requests <= 150) return "#84cc16"
@@ -443,7 +536,7 @@ export default {
       }
 
       if (metric === "loadTime") {
-        const loadTime = this.result.load_time || 0
+        const loadTime = this.currentResult.load_time || 0
 
         if (loadTime <= 3) return "#22c55e"
         if (loadTime <= 5) return "#84cc16"
@@ -949,6 +1042,78 @@ export default {
   vertical-align: middle;
 }
 
+.view-switcher {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 22px;
+  padding: 6px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.view-switcher button {
+  flex: 1;
+  padding: 14px 18px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: #94a3b8;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 0.25s;
+}
+
+.view-switcher button:hover {
+  color: white;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.view-switcher button.active {
+  color: white;
+  background: rgba(34, 197, 94, 0.16);
+  border-color: #22c55e;
+  box-shadow: 0 0 20px rgba(34, 197, 94, 0.15);
+}
+
+.image-counterfactual {
+  margin-bottom: 22px;
+  padding: 30px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 15px 45px rgba(0, 0, 0, 0.35);
+}
+
+.image-counterfactual h2 {
+  margin: 0 0 24px;
+}
+
+.counterfactual-values {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.counterfactual-values div {
+  padding: 18px;
+  border-radius: 14px;
+  background: #172335;
+}
+
+.counterfactual-values span {
+  display: block;
+  margin-bottom: 8px;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.counterfactual-values strong {
+  color: #ffffff;
+  font-size: 20px;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -1001,6 +1166,14 @@ export default {
 
   .main-title {
     font-size: 38px;
+  }
+
+  .view-switcher {
+    flex-direction: column;
+  }
+
+  .counterfactual-values {
+    grid-template-columns: 1fr;
   }
 }
 </style>

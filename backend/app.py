@@ -3,7 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from website_data_collection_engine import WebsiteMeasurementEngine
-from carbon_footprint_estimation_engine import calculate_co2
+from carbon_footprint_estimation_engine import (
+    calculate_co2, 
+    calculate_co2_from_bytes,
+    add_carbon_data
+)
 
 app = FastAPI()
 
@@ -33,9 +37,9 @@ def analyze(data: AnalyzeRequest):
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    carbon_result = calculate_co2(measurement)
-
     return {
-        **measurement,
-        **carbon_result
+        "url": measurement["url"],
+        "baseline": add_carbon_data(measurement["baseline"]),
+        "full_scroll": add_carbon_data(measurement["full_scroll"]),
+        "without_third_party": add_carbon_data(measurement["without_third_party"])
     }

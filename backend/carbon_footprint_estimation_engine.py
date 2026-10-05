@@ -93,18 +93,25 @@ def get_rating(co2_per_visit):
         return "E"
     else:
         return "F"
-    
-def calculate_co2(entry):
-    total_bytes = entry["total_bytes"]
 
+def calculate_co2_from_bytes(total_bytes):
     if total_bytes < 0:
         raise ValueError("total_bytes must be a non-negative number.")
 
     total_bytes_in_gb = total_bytes / bytes_per_gb
 
-    total_energy = total_bytes_in_gb * (dc_kwh_per_gb + core_network_total + user_device_kwh_per_gb)
+    total_energy = total_bytes_in_gb * (
+        dc_kwh_per_gb +
+        core_network_total +
+        user_device_kwh_per_gb
+    )
 
-    co2_per_visit = total_energy * carbon_intensity
+    return total_energy * carbon_intensity
+
+def calculate_co2(entry):
+    total_bytes = entry["total_bytes"]
+
+    co2_per_visit = calculate_co2_from_bytes(total_bytes)
     co2_per_1000_visits = co2_per_visit * 1000
     rating = get_rating(co2_per_visit)
 
@@ -114,6 +121,21 @@ def calculate_co2(entry):
         "co2_per_1000_visits": round(co2_per_1000_visits, 1),
         "rating": rating
     }
+
+    return result
+
+def add_carbon_data(entry):
+    result = {**entry, **calculate_co2(entry)}
+    image_transcoding = entry.get("image_transcoding")
+
+    if image_transcoding:
+        saved_co2_per_visit = calculate_co2_from_bytes(image_transcoding["saved_bytes"])
+
+        result["image_transcoding"] = {
+            **image_transcoding,
+            "saved_co2_per_visit": round(saved_co2_per_visit, 4),
+            "saved_co2_per_1000_visits": round(saved_co2_per_visit * 1000, 1)
+        }
 
     return result
 

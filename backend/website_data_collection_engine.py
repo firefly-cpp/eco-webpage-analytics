@@ -1,21 +1,46 @@
 import logging
-
+import io
 import time
 from dataclasses import dataclass
-from typing import Any, Dict,  Optional
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
-from playwright.sync_api import Browser, Error, Page, Request, sync_playwright
+import tldextract
+from PIL import Image, UnidentifiedImageError
+from playwright.sync_api import Browser, Error, Page, Request, Route, sync_playwright
 
 LOGGER = logging.getLogger("website-data-collector")
 logging.basicConfig(level=getattr(logging, "INFO"), format="%(levelname)s %(message)s")
 
-TRACKED_RESOURCE_TYPES = {"image", "script", "stylesheet"}
+TRACKED_RESOURCE_TYPES = {"image", "script", "stylesheet", "font", "media"}
 
 DEFAULT_TIMEOUT_MS = 45000
 DEFAULT_QUIET_WINDOW_MS = 1000
 DEFAULT_MAX_OBSERVATION_MS = 15000
 DEFAULT_POLL_INTERVAL_MS = 100
+DEFAULT_MAX_SCROLLS = 100
+DEFAULT_SCROLL_WAIT_MS = 750
+DEFAULT_SCROLL_STEP_RATIO = 0.8
+
+WEBP_QUALITY = 80
+
+TLD_EXTRACTOR = tldextract.TLDExtract(suffix_list_urls=())
+
+
+@dataclass
+class RequestRecord:
+    resource_type: str
+    third_party: bool = False
+    transfer_bytes: int = 0
+    webp_bytes: Optional[int] = None
+    completed: bool = False
+
+
+@dataclass
+class SingleRunResult:
+    success: bool
+    summary: Dict[str, Any]
+    error: Optional[str] = None
 
 
 def normalize_url(url: str) -> str:
@@ -35,18 +60,28 @@ def normalize_url(url: str) -> str:
     return url
 
 
-@dataclass
-class RequestRecord:
-    resource_type: str
-    transfer_bytes: int = 0
-    completed: bool = False
+def get_registered_domain(url: str) -> str:
+    parsed = urlparse(url)
+
+    if not parsed.hostname:
+        return ""
+
+    extracted = TLD_EXTRACTOR(parsed.hostname)
+
+    if extracted.suffix:
+        return f"{extracted.domain}.{extracted.suffix}"
+
+    return parsed.hostname
 
 
-@dataclass
-class SingleRunResult:
-    success: bool
-    summary: Dict[str, Any]
-    error: Optional[str] = None
+def is_third_party(request_url: str, page_url: str) -> bool:
+    request_domain = get_registered_domain(request_url)
+    page_domain = get_registered_domain(page_url)
+
+    if not request_domain or not page_domain:
+        return False
+
+    return request_domain != page_domain
 
 
 class WebsiteMeasurementEngine:
@@ -81,14 +116,39 @@ class WebsiteMeasurementEngine:
             browser = playwright.chromium.launch(headless=self.headless)
 
             try:
-                result = self.measure_run(browser, normalized_url)
+                baseline = self.measure_run(browser, normalized_url)
+                full_scroll = self.measure_run(browser, normalized_url, scroll_page=True)
+                without_third_party = self.measure_run(browser, normalized_url, block_third_party=True)
             finally:
                 browser.close()
 
-        if not result.success:
-            raise RuntimeError(result.error or f"Failed to measure {normalized_url}")
+        if not baseline.success:
+            raise RuntimeError(baseline.error or f"Failed to measure {normalized_url}")
 
-        return result.summary
+        if not full_scroll.success:
+                    raise RuntimeError(full_scroll.error or f"Failed to measure full scroll for {normalized_url}")
+
+        if not without_third_party.success:
+                    raise RuntimeError(without_third_party.error or f"Failed to measure without third-party resources for {normalized_url}")
+
+        optimizable_image_bytes = baseline.summary.get("images_optimizable_bytes", 0)
+        webp_bytes = baseline.summary.get("images_webp_bytes", 0)
+
+        return {
+            "url": normalized_url,
+            "baseline": {
+                **baseline.summary,
+                "image_transcoding": self.build_image_transcoding(baseline.summary)
+            },
+            "full_scroll": {
+                **full_scroll.summary,
+                "image_transcoding": self.build_image_transcoding(full_scroll.summary)
+            },
+            "without_third_party": {
+                **without_third_party.summary,
+                "image_transcoding": self.build_image_transcoding(without_third_party.summary)
+            }
+        }
 
     def build_context(self, browser: Browser):
         return browser.new_context(
@@ -100,8 +160,12 @@ class WebsiteMeasurementEngine:
         )
     
 
-    def measure_run(self, browser: Browser, input_url: str):
+    def measure_run(self, browser: Browser, input_url: str, *, scroll_page: bool = False, block_third_party: bool = False):
         context = self.build_context(browser)
+
+        if block_third_party:
+            context.route("**/*", lambda route: self.handle_route(route, input_url))
+
         page = context.new_page()
         page.set_default_timeout(self.timeout_ms)
         page.set_default_navigation_timeout(self.timeout_ms)
@@ -116,6 +180,19 @@ class WebsiteMeasurementEngine:
             nonlocal last_network_activity
             last_network_activity = time.monotonic()
 
+        def wait_for_network_quiet():
+            quiet_window_seconds = self.quiet_window_ms / 1000.0
+            deadline = (time.monotonic() + self.max_observation_ms / 1000.0)
+
+            while time.monotonic() < deadline:
+                now = time.monotonic()
+                quiet_for_long_enough = (now - last_network_activity >= quiet_window_seconds)
+
+                if not in_flight_requests and quiet_for_long_enough:
+                    break
+
+                page.wait_for_timeout(DEFAULT_POLL_INTERVAL_MS)
+
         def on_request(request: Request):
             if not collecting:
                 return
@@ -125,7 +202,10 @@ class WebsiteMeasurementEngine:
             else:
                 resource_type = "other"
 
-            request_records[request] = RequestRecord(resource_type=resource_type)
+            request_records[request] = RequestRecord(
+                resource_type=resource_type,
+                third_party=is_third_party(request.url, input_url)
+            )
 
             in_flight_requests.add(request)
             mark_network_activity()
@@ -142,11 +222,16 @@ class WebsiteMeasurementEngine:
 
             try:
                 sizes = request.sizes()
-                body_size = max(0, int(sizes.get("responseBodySize", 0) or 0))
-                header_size = max(0, int(sizes.get("responseHeadersSize", 0) or 0))
+                request_body_size = max(0, int(sizes.get("requestBodySize", 0) or 0))
+                request_header_size = max(0, int(sizes.get("requestHeadersSize", 0) or 0))
+                response_body_size = max(0, int(sizes.get("responseBodySize", 0) or 0))
+                response_header_size = max(0,int(sizes.get("responseHeadersSize", 0) or 0))
 
-                record.transfer_bytes = body_size + header_size
+                record.transfer_bytes = request_body_size + request_header_size + response_body_size + response_header_size
                 record.completed = True
+
+                if record.resource_type == "image":
+                    record.webp_bytes = self.measure_webp_size(request)
 
             except Error as exc:
                 LOGGER.warning("Could not obtain response size for %s: %s", request.url, exc)
@@ -160,7 +245,6 @@ class WebsiteMeasurementEngine:
                 return
             
             in_flight_requests.discard(request)
-            request_records.pop(request, None)
             mark_network_activity()
 
         page.on("request", on_request)
@@ -174,19 +258,11 @@ class WebsiteMeasurementEngine:
         try:
             main_response = page.goto(input_url, wait_until="load")
 
-            quiet_window_seconds = self.quiet_window_ms / 1000.0
-            deadline = (time.monotonic() + self.max_observation_ms / 1000.0)
+            wait_for_network_quiet()
 
-            while time.monotonic() < deadline:
-                now = time.monotonic()
-
-                quiet_for_long_enough = (now - last_network_activity >= quiet_window_seconds)
-
-                if not in_flight_requests and quiet_for_long_enough:
-                    break
-
-                page.wait_for_timeout(DEFAULT_POLL_INTERVAL_MS)
-
+            if scroll_page:
+                self.scroll_page(page)
+                wait_for_network_quiet()
 
             if main_response is None:
                 error_message = "Navigation completed without an HTTP response."
@@ -207,6 +283,98 @@ class WebsiteMeasurementEngine:
             context.close()
 
         return SingleRunResult(success=success, summary=summary, error=error_message)
+
+    @staticmethod
+    def build_image_transcoding(summary: Dict[str, Any]):
+        original_bytes = summary.get("images_optimizable_bytes", 0)
+        webp_bytes = summary.get("images_webp_bytes", 0)
+
+        return {
+            "quality": WEBP_QUALITY,
+            "original_bytes": original_bytes,
+            "webp_bytes": webp_bytes,
+            "saved_bytes": max(0,original_bytes - webp_bytes)
+        }
+
+    @staticmethod
+    def handle_route(route: Route, input_url: str):
+        if is_third_party(route.request.url, input_url):
+            route.abort()
+        else:
+            route.continue_()
+
+    @staticmethod
+    def measure_webp_size(request: Request):
+        try:
+            response = request.response()
+
+            if response is None:
+                return None
+
+            body = response.body()
+
+            if not body:
+                return None
+
+            with Image.open(io.BytesIO(body)) as image:
+                if getattr(image, "is_animated", False):
+                    return None
+
+                image.load()
+                has_alpha = ("A" in image.getbands() or "transparency" in image.info)
+
+                if image.mode not in {"RGB", "RGBA"}:
+                    image = image.convert("RGBA" if has_alpha else "RGB")
+
+                output = io.BytesIO()
+                image.save(output, format="WEBP", quality=WEBP_QUALITY)
+
+                return output.tell()
+
+        except (Error, OSError, UnidentifiedImageError):
+            return None
+
+    @staticmethod
+    def scroll_page(page: Page):
+        for _ in range(DEFAULT_MAX_SCROLLS):
+            scroll_data = page.evaluate(
+                """
+                () => {
+                  const documentHeight = Math.max(
+                    document.body.scrollHeight,
+                    document.documentElement.scrollHeight
+                  );
+
+                  return {
+                    documentHeight,
+                    scrollY: window.scrollY,
+                    viewportHeight: window.innerHeight
+                  };
+                }
+                """
+            )
+
+            document_height = scroll_data["documentHeight"]
+            scroll_y = scroll_data["scrollY"]
+            viewport_height = scroll_data["viewportHeight"]
+
+            if scroll_y + viewport_height >= document_height:
+                page.wait_for_timeout(DEFAULT_SCROLL_WAIT_MS)
+
+                new_document_height = page.evaluate(
+                    """
+                    () => Math.max(
+                      document.body.scrollHeight,
+                      document.documentElement.scrollHeight
+                    )
+                    """
+                )
+
+                if new_document_height <= document_height:
+                    break
+
+            page.mouse.wheel(0, int(viewport_height * DEFAULT_SCROLL_STEP_RATIO))
+            page.wait_for_timeout(DEFAULT_SCROLL_WAIT_MS)
 
     @staticmethod
     def collect_page_metrics(page: Page):
@@ -231,23 +399,47 @@ class WebsiteMeasurementEngine:
             "requests": 0,
             "images_bytes": 0,
             "js_bytes": 0,
-            "css_bytes": 0
+            "css_bytes": 0,
+            "fonts_bytes": 0,
+            "media_bytes": 0,
+            "third_party_bytes": 0,
+            "third_party_requests": 0,
+            "images_optimizable_bytes": 0,
+            "images_webp_bytes": 0,
+            "unfinished_requests": 0
         }
 
         for record in request_records.values():
             if not record.completed:
+                totals["unfinished_requests"] += 1
                 continue
 
             size = record.transfer_bytes
             totals["total_bytes"] += size
             totals["requests"] += 1
 
+            if record.third_party:
+                totals["third_party_bytes"] += size
+                totals["third_party_requests"] += 1
+
             if record.resource_type == "image":
                 totals["images_bytes"] += size
+
+                if record.webp_bytes is not None:
+                    totals["images_optimizable_bytes"] += size
+                    totals["images_webp_bytes"] += record.webp_bytes
+
             elif record.resource_type == "script":
                 totals["js_bytes"] += size
+
             elif record.resource_type == "stylesheet":
                 totals["css_bytes"] += size
+
+            elif record.resource_type == "font":
+                totals["fonts_bytes"] += size
+
+            elif record.resource_type == "media":
+                totals["media_bytes"] += size
 
         load_ms = page_metrics.get("loadMs")
 
