@@ -1,5 +1,7 @@
 import argparse
+import csv
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -15,17 +17,19 @@ core_network_dcn_per_gb = 0.013
 # Unit: kWh/GB
 core_network_total = core_network_ann_per_gb + core_network_dcn_per_gb
 
-# SWDM v4 total data-centre energy intensity:
-# operational data-centre energy: 0.055 kWh/GB
-# embodied data-centre energy:    0.012 kWh/GB
+# SWDM v4 data-centre energy intensity:
 # Unit: kWh/GB
-dc_kwh_per_gb = 0.055 + 0.012
+dc_operational_kwh_per_gb = 0.055
+dc_embodied_kwh_per_gb = 0.012
 
-# SWDM v4 total user-device energy intensity:
-# operational user-device energy: 0.080 kWh/GB
-# embodied user-device energy:    0.081 kWh/GB
+dc_kwh_per_gb = dc_operational_kwh_per_gb + dc_embodied_kwh_per_gb
+
+# SWDM v4 user-device energy intensity:
 # Unit: kWh/GB
-user_device_kwh_per_gb = 0.080 + 0.081
+user_device_operational_kwh_per_gb = 0.080
+user_device_embodied_kwh_per_gb = 0.081
+
+user_device_kwh_per_gb = user_device_operational_kwh_per_gb + user_device_embodied_kwh_per_gb
 
 # byte-to-gigabyte conversion used by SWDM v4:
 # Unit: bytes/GB
@@ -36,6 +40,71 @@ bytes_per_gb = 1000000000
 # Unit: gCO2e/kWh
 carbon_intensity = 494
 
+# separate conversion assumption for embodied emissions.
+embodied_carbon_intensity = 494
+
+# ember yearly electrical data
+data_file = Path(__file__).parent / "data" / "ember_yearly.csv"
+
+
+def load_carbon_factors():
+    carbon_factors = {}
+
+    with open(data_file, "r", encoding="utf-8-sig", newline="") as file:
+        data = csv.DictReader(file)
+
+        for row in data:
+            if row["Electricity source"] != "Total generation":
+                continue
+
+            value = row["Emissions intensity (gCO2e/kWh)"]
+
+            if not value:
+                continue
+
+            location_carbon_intensity = float(value)
+
+            if not math.isfinite(location_carbon_intensity):
+                continue
+
+            if location_carbon_intensity < 0:
+                continue
+
+            #use the ISO code.
+            location_code = row["ISO 3 code"].strip().upper()
+
+            #regions such as world have no ISO code
+            if not location_code:
+                location_code = row["Area"].strip().upper()
+
+            year = int(row["Year"])
+
+            #keep only latest year
+            if location_code in carbon_factors:
+                if year <= carbon_factors[location_code]["year"]:
+                    continue
+
+            carbon_factors[location_code] = {
+                "name": row["Area"],
+                "carbon_intensity": location_carbon_intensity,
+                "year": year
+            }
+
+    if not carbon_factors:
+        raise ValueError("The dataset contains no usable carbon factors.")
+
+    return carbon_factors
+
+# load the dataset only once
+carbon_factors = load_carbon_factors()
+
+def get_carbon_factor(location_code):
+    location_code = location_code.strip().upper()
+
+    if location_code not in carbon_factors:
+        raise ValueError("Unknown carbon-factor location: " + location_code)
+
+    return carbon_factors[location_code].copy()
 
 def read_json_file(file_path):
     with open(file_path, "r", encoding="utf-8") as file:
@@ -94,42 +163,150 @@ def get_rating(co2_per_visit):
     else:
         return "F"
 
-def calculate_co2_from_bytes(total_bytes):
+def calculate_co2_breakdown_from_bytes(total_bytes,
+    visitor_carbon_intensity=carbon_intensity,
+    hosting_carbon_intensity=carbon_intensity,
+    network_carbon_intensity=carbon_intensity):
+
     if total_bytes < 0:
         raise ValueError("total_bytes must be a non-negative number.")
 
     total_bytes_in_gb = total_bytes / bytes_per_gb
 
-    total_energy = total_bytes_in_gb * (
-        dc_kwh_per_gb +
-        core_network_total +
-        user_device_kwh_per_gb
+    dc_operational_co2 = (
+        total_bytes_in_gb *
+        dc_operational_kwh_per_gb *
+        hosting_carbon_intensity
     )
 
-    return total_energy * carbon_intensity
+    network_operational_co2 = (
+        total_bytes_in_gb *
+        core_network_ann_per_gb *
+        network_carbon_intensity
+    )
 
-def calculate_co2(entry):
+    user_device_operational_co2 = (
+        total_bytes_in_gb *
+        user_device_operational_kwh_per_gb *
+        visitor_carbon_intensity
+    )
+
+    embodied_co2 = (
+        total_bytes_in_gb * (
+            dc_embodied_kwh_per_gb + 
+            core_network_dcn_per_gb + 
+            user_device_embodied_kwh_per_gb
+        ) * embodied_carbon_intensity        
+    )
+
+    operational_co2 = (
+        dc_operational_co2 +
+        network_operational_co2 +
+        user_device_operational_co2
+    )
+
+    total_co2 = operational_co2 + embodied_co2
+
+    return {
+        "dc_operational_co2": dc_operational_co2,
+        "network_operational_co2": network_operational_co2,
+        "user_device_operational_co2": user_device_operational_co2,
+        "operational_co2": operational_co2,
+        "embodied_co2": embodied_co2,
+        "total_co2": total_co2
+    }
+
+
+def calculate_co2_from_bytes(total_bytes,
+    visitor_carbon_intensity=carbon_intensity,
+    hosting_carbon_intensity=carbon_intensity,
+    network_carbon_intensity=carbon_intensity):
+
+    breakdown = calculate_co2_breakdown_from_bytes(
+        total_bytes,
+        visitor_carbon_intensity,
+        hosting_carbon_intensity,
+        network_carbon_intensity
+    )
+
+    return breakdown["total_co2"]
+
+
+def calculate_co2_for_locations(total_bytes, visitor_location="WORLD",
+    hosting_location="WORLD"):
+
+    visitor_factor = get_carbon_factor(visitor_location)
+    hosting_factor = get_carbon_factor(hosting_location)
+    network_factor = get_carbon_factor("WORLD")
+
+    return calculate_co2_from_bytes(
+        total_bytes,
+        visitor_carbon_intensity=visitor_factor["carbon_intensity"],
+        hosting_carbon_intensity=hosting_factor["carbon_intensity"],
+        network_carbon_intensity=network_factor["carbon_intensity"]
+    )
+
+def calculate_co2(entry, visitor_location="WORLD", hosting_location="WORLD"):
     total_bytes = entry["total_bytes"]
 
-    co2_per_visit = calculate_co2_from_bytes(total_bytes)
+    visitor_factor = get_carbon_factor(visitor_location)
+    hosting_factor = get_carbon_factor(hosting_location)
+    network_factor = get_carbon_factor("WORLD")
+
+    breakdown = calculate_co2_breakdown_from_bytes(
+        total_bytes,
+        visitor_carbon_intensity=visitor_factor["carbon_intensity"],
+        hosting_carbon_intensity=hosting_factor["carbon_intensity"],
+        network_carbon_intensity=network_factor["carbon_intensity"]
+    )
+
+    co2_per_visit = breakdown["total_co2"]
     co2_per_1000_visits = co2_per_visit * 1000
     rating = get_rating(co2_per_visit)
+
+    rounded_breakdown = {}
+    for name, value in breakdown.items():
+        rounded_breakdown[name] = round(value, 6)
 
     result = {
         "url": entry["url"],
         "co2_per_visit": round(co2_per_visit, 4),
         "co2_per_1000_visits": round(co2_per_1000_visits, 1),
-        "rating": rating
+        "rating": rating,
+
+        "carbon_breakdown": rounded_breakdown,
+        "carbon_breakdown_unit": "gCO2e/visit",
+
+        "carbon_factors": {
+            "visitor": {
+                "location_code": visitor_location.strip().upper(),
+                **visitor_factor
+            },
+            "hosting": {
+                "location_code": hosting_location.strip().upper(),
+                **hosting_factor
+            },
+            "network": {
+                "location_code": "WORLD",
+                **network_factor
+            },
+            "embodied": {
+                "carbon_intensity": embodied_carbon_intensity
+            }
+        }
     }
 
     return result
 
-def add_carbon_data(entry):
-    result = {**entry, **calculate_co2(entry)}
+def add_carbon_data(entry, visitor_location="WORLD", hosting_location="WORLD"):
+    result = {**entry, **calculate_co2(entry, visitor_location, hosting_location)}
     image_transcoding = entry.get("image_transcoding")
 
     if image_transcoding:
-        saved_co2_per_visit = calculate_co2_from_bytes(image_transcoding["saved_bytes"])
+        saved_co2_per_visit = calculate_co2_for_locations(image_transcoding["saved_bytes"],
+            visitor_location,
+            hosting_location
+        )
 
         result["image_transcoding"] = {
             **image_transcoding,

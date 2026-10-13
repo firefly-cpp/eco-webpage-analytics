@@ -25,7 +25,7 @@
             placeholder="https://example.com"
         />
 
-        <button type="submit" :disabled="loading">
+        <button type="submit" :disabled="loading || recalculating || locations_loading || locations.length === 0">
 
           <span v-if="loading" class="spinner"></span>
 
@@ -34,6 +34,60 @@
         </button>
       </form>
 
+      <div class="location-selectors">
+        <div class="location-field">
+          <label for="visitor-location">Visitor location</label>
+
+          <select
+            id="visitor-location"
+            v-model="visitor_location"
+            @change="recalculateCarbon"
+            :disabled="loading || recalculating || locations_loading || locations.length === 0"
+          >
+            <option
+              v-for="location in locations"
+              :key="location.location_code"
+              :value="location.location_code"
+            >
+              {{ location.name }}
+            </option>
+          </select>
+        </div>
+
+        <div class="location-field">
+          <label for="hosting-location">Hosting location</label>
+
+          <select
+            id="hosting-location"
+            v-model="hosting_location"
+            @change="recalculateCarbon"
+            :disabled="loading || recalculating || locations_loading || locations.length === 0"
+          >
+            <option
+              v-for="location in locations"
+              :key="location.location_code"
+              :value="location.location_code"
+            >
+              {{ location.name }}
+            </option>
+          </select>
+        </div>
+      </div>
+
+      <p
+        class="recalculation-status"
+        :class="{ visible: recalculating }"
+        role="status"
+      >
+        {{ recalculating ? "Updating carbon estimates..." : "" }}
+      </p>
+      
+      <p v-if="locations_loading">Loading locations...</p>
+
+      <p v-if="locations_error" class="error-message">
+        {{ locations_error }}
+      </p>
+
       <p v-if="error" class="error-message">
         {{ error }}
       </p>
@@ -41,6 +95,61 @@
     </section>
 
     <section v-if="currentResult" class="results">
+      <div v-if="currentResult.carbon_factors" class="panel scenario-panel">
+        <h2>Calculated location scenario</h2>
+
+        <div class="scenario-grid">
+          <div>
+            <p class="card-label">Visitor location</p>
+            <strong>{{ currentResult.carbon_factors.visitor.name }}</strong>
+
+            <p>
+              {{ currentResult.carbon_factors.visitor.carbon_intensity }}
+              gCO₂e/kWh
+            </p>
+
+            <small>
+              Data year: {{ currentResult.carbon_factors.visitor.year }}
+            </small>
+          </div>
+
+          <div>
+            <p class="card-label">Hosting location</p>
+            <strong>{{ currentResult.carbon_factors.hosting.name }}</strong>
+
+            <p>
+              {{ currentResult.carbon_factors.hosting.carbon_intensity }}
+              gCO₂e/kWh
+            </p>
+
+            <small>
+              Data year: {{ currentResult.carbon_factors.hosting.year }}
+            </small>
+          </div>
+
+          <div>
+            <p class="card-label">Network assumption</p>
+            <strong>World average</strong>
+
+            <p>
+              {{ currentResult.carbon_factors.network.carbon_intensity }}
+              gCO₂e/kWh
+            </p>
+
+            <small>
+              Data year: {{ currentResult.carbon_factors.network.year }}
+            </small>
+          </div>
+        </div>
+
+        <p class="scenario-note">
+          Electricity factors: Ember annual generation averages.
+          Embodied emissions use a separate model assumption of
+          {{ currentResult.carbon_factors.embodied.carbon_intensity }}
+          gCO₂e/kWh-equivalent.
+        </p>
+      </div>
+
       <div class="view-switcher">
         <button :class="{ 
             active: selectedView === 'baseline' 
@@ -76,7 +185,7 @@
           </div>
 
           <div class="rating-info">
-            <p>This rating reflects the estimated carbon emissions per visit.</p>
+            <p>This rating reflects estimated emissions per visit for the calculated location scenario.</p>
             <p>Lower emissions mean a better rating.</p>
           </div>
         </div>
@@ -179,6 +288,68 @@
         </div>
       </div>
 
+      <div v-if="currentResult.carbon_breakdown" class="panel emissions-panel">
+        <h2>Emissions breakdown</h2>
+
+        <table class="emissions-table">
+          <thead>
+            <tr>
+            <th scope="col">Component</th>
+              <th scope="col">gCO₂e per visit</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>Data-centre operation</td>
+              <td>
+                {{ formatCo2(currentResult.carbon_breakdown.dc_operational_co2) }}
+              </td>
+            </tr>
+
+            <tr>
+              <td>Network operation</td>
+              <td>
+                {{ formatCo2(currentResult.carbon_breakdown.network_operational_co2) }}
+              </td>
+            </tr>
+
+            <tr>
+              <td>User-device operation</td>
+              <td>
+                {{ formatCo2(currentResult.carbon_breakdown.user_device_operational_co2) }}
+              </td>
+            </tr>
+
+            <tr class="subtotal-row">
+              <td>Operational subtotal</td>
+              <td>
+                {{ formatCo2(currentResult.carbon_breakdown.operational_co2) }}
+              </td>
+            </tr>
+
+            <tr>
+              <td>Embodied emissions</td>
+              <td>
+                {{ formatCo2(currentResult.carbon_breakdown.embodied_co2) }}
+              </td>
+            </tr>
+
+            <tr class="total-row">
+              <td>Total</td>
+              <td>
+                {{ formatCo2(currentResult.carbon_breakdown.total_co2) }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p class="scenario-note">
+          Total emissions = operational subtotal + embodied emissions.
+          Embodied emissions represent allocated equipment manufacturing impacts.
+        </p>
+      </div>
+
       <div class="content-grid">
         <div class="panel">
           <h2>Resource Breakdown</h2>
@@ -243,6 +414,12 @@ export default {
       loading: false,
       error: "",
       chart: null,
+      locations: [],
+      visitor_location: "WORLD",
+      hosting_location: "WORLD",
+      locations_loading: true,
+      locations_error: "",
+      recalculating: false,
     }
   },
 
@@ -369,6 +546,105 @@ export default {
       })
     },
 
+    async loadLocations() {
+      this.locations_loading = true
+      this.locations_error = ""
+
+      try {
+        const response = await fetch(
+          "http://127.0.0.1:8000/api/locations"
+        )
+
+        if (!response.ok) {
+          throw new Error("Could not load the available locations.")
+        }
+
+        const locations = await response.json()
+
+        if (!Array.isArray(locations) || locations.length === 0) {
+          throw new Error("No locations are available.")
+        }
+
+        const worldLocation = locations.find(
+          location => location.location_code === "WORLD"
+        )
+
+        if (!worldLocation) {
+          throw new Error("The dataset does not contain a World average.")
+        }
+
+        this.locations = locations
+
+      } catch (error) {
+        this.locations = []
+        this.locations_error =
+          error.message || "Could not load the available locations."
+
+      } finally {
+        this.locations_loading = false
+      }
+    },
+
+    formatCo2(value) {
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+          return "—"
+        }
+
+        return value.toFixed(6)
+    },
+
+    async recalculateCarbon() {
+      if (!this.result || this.loading || this.recalculating) {
+        return
+      }
+
+      const previousVisitor =
+        this.result.baseline.carbon_factors.visitor.location_code
+
+      const previousHosting =
+        this.result.baseline.carbon_factors.hosting.location_code
+
+      this.recalculating = true
+      this.error = ""
+
+      try {
+        const response = await fetch(
+          "http://127.0.0.1:8000/api/recalculate",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              url: this.result.url,
+              visitor_location: this.visitor_location,
+              hosting_location: this.hosting_location,
+              baseline: this.result.baseline,
+              full_scroll: this.result.full_scroll,
+              without_third_party: this.result.without_third_party,
+            }),
+          }
+        )
+
+        const data = await response.json()
+
+        if (!response.ok) {
+          throw new Error("Could not recalculate the carbon estimates.")
+        }
+
+        this.result = data
+
+      } catch (error) {
+        this.visitor_location = previousVisitor
+        this.hosting_location = previousHosting
+
+        this.error = error.message || "Could not recalculate the carbon estimates."
+
+      } finally {
+        this.recalculating = false
+      }
+    },
+
     renderChart() {
 
       if (!this.currentResult) return
@@ -452,6 +728,15 @@ export default {
 
     async analyzeWebsite() {
 
+      if (this.loading || this.recalculating) {
+        return
+      }
+
+      if (this.locations_loading || this.locations.length === 0) {
+        this.error = "Please wait until the locations have loaded."
+        return
+      }
+
       this.loading = true
       this.error = ""
       this.result = null
@@ -467,6 +752,8 @@ export default {
           },
           body: JSON.stringify({
             url: this.url,
+            visitor_location: this.visitor_location,
+            hosting_location: this.hosting_location,
           }),
         })
 
@@ -632,6 +919,8 @@ export default {
   },
 
   mounted() {
+    this.loadLocations()
+
     const savedUrl = localStorage.getItem("saved-url")
 
     if (savedUrl) {
@@ -1114,6 +1403,124 @@ export default {
   font-size: 20px;
 }
 
+.location-selectors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 20px;
+}
+
+.location-field {
+  min-width: 0;
+  text-align: left;
+}
+
+.location-field label {
+  display: block;
+  margin-bottom: 8px;
+  color: #cbd5e1;
+  font-size: 14px;
+}
+
+.location-field select {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #162133;
+  color: white;
+  font-size: 15px;
+}
+
+.location-field select:focus {
+  outline: none;
+  border-color: #22c55e;
+}
+
+.location-field select:disabled {
+  opacity: 0.6;
+}
+
+.scenario-panel,
+.emissions-panel {
+  margin-bottom: 22px;
+}
+
+.scenario-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.scenario-grid strong {
+  font-size: 18px;
+}
+
+.scenario-grid p {
+  color: #cbd5e1;
+}
+
+.scenario-grid small {
+  color: #94a3b8;
+}
+
+.scenario-note {
+  margin: 20px 0 0;
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.emissions-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.emissions-table th,
+.emissions-table td {
+  padding: 14px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  text-align: left;
+}
+
+.emissions-table th {
+  color: #94a3b8;
+}
+
+.emissions-table th:last-child,
+.emissions-table td:last-child {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.subtotal-row {
+  background: rgba(255, 255, 255, 0.04);
+  font-weight: 600;
+}
+
+.total-row {
+  background: rgba(34, 197, 94, 0.1);
+  color: #4ade80;
+  font-weight: 700;
+}
+
+.recalculation-status {
+  min-height: 20px;
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: #94a3b8;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.recalculation-status.visible {
+  opacity: 1;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -1175,5 +1582,15 @@ export default {
   .counterfactual-values {
     grid-template-columns: 1fr;
   }
+
+  .location-selectors {
+  grid-template-columns: 1fr;
+  }
+
+  .scenario-grid {
+  grid-template-columns: 1fr;
+  }
 }
+
+
 </style>
