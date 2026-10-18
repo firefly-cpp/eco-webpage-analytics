@@ -10,3 +10,11 @@ playwright = "^1.52.0"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+pythonpath = ["backend"]
+addopts = "--cov=backend --cov-report=term-missing"
+
+[tool.coverage.run]
+omit = ["backend/tests/*"]
