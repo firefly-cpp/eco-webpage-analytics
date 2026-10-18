@@ -119,5 +119,17 @@ Backend runs on:
 ```txt
 http://127.0.0.1:8000
 ```
+---
 
+# Run Tests
+
+Backend unit tests are written with pytest. Test dependencies are included in `requirements.txt`.
+
+Run the tests from the project root folder (with the virtual environment activated):
+
+```bash
+pytest
+```
+
+This also prints a test coverage report for the backend.
 
