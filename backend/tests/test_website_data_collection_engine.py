@@ -219,7 +219,7 @@ def test_measure_url_runs_all_three_scenarios(monkeypatch):
 
     result = engine.measure_url("example.com")
 
-    assert calls == [(False, False), (True, False), (False, True)]
+    assert calls == [(False, False), (True, False), (True, True)]
     assert result["url"] == "https://example.com"
     assert result["baseline"]["total_bytes"] == 100
     assert result["full_scroll"]["total_bytes"] == 200
