@@ -288,6 +288,43 @@
         </div>
       </div>
 
+      <div v-if="thirdPartyComparison" class="image-counterfactual">
+        <div>
+          <p class="card-label">
+            Third-Party Counterfactual
+          </p>
+
+          <h2>
+            With vs. without third-party resources (full scroll)
+          </h2>
+        </div>
+
+        <div class="counterfactual-values">
+          <div>
+            <span>With third parties</span>
+            <strong>{{ formatBytes(thirdPartyComparison.withBytes) }}</strong>
+          </div>
+
+          <div>
+            <span>Without third parties</span>
+            <strong>{{ formatBytes(thirdPartyComparison.withoutBytes) }}</strong>
+          </div>
+
+          <div>
+            <span>Third-party share</span>
+            <strong>
+              -{{ formatBytes(thirdPartyComparison.savedBytes) }}
+              ({{ thirdPartyComparison.savedPercent }}%)
+            </strong>
+          </div>
+
+          <div>
+            <span>CO₂ saving / visit</span>
+            <strong>-{{ thirdPartyComparison.savedCo2 }}g</strong>
+          </div>
+        </div>
+      </div>
+
       <div v-if="currentResult.carbon_breakdown" class="panel emissions-panel">
         <h2>Emissions breakdown</h2>
 
@@ -430,6 +467,28 @@ export default {
       }
 
       return this.result[this.selectedView]
+    },
+
+    thirdPartyComparison() {
+      if (!this.result || !this.result.full_scroll || !this.result.without_third_party) {
+        return null
+      }
+
+      const withThirdParty = this.result.full_scroll
+      const withoutThirdParty = this.result.without_third_party
+
+      const savedBytes = Math.max(0, withThirdParty.total_bytes - withoutThirdParty.total_bytes)
+      const savedCo2 = Math.max(0, withThirdParty.co2_per_visit - withoutThirdParty.co2_per_visit)
+
+      return {
+        withBytes: withThirdParty.total_bytes,
+        withoutBytes: withoutThirdParty.total_bytes,
+        savedBytes,
+        savedPercent: withThirdParty.total_bytes
+            ? Math.round((savedBytes / withThirdParty.total_bytes) * 100)
+            : 0,
+        savedCo2: savedCo2.toFixed(4)
+      }
     },
 
     breakdown() {
@@ -1206,6 +1265,12 @@ export default {
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
+}
+
+.metric-card {
+  --metric-color: #22c55e;
+  --metric-color-soft: #4ade80;
+  /* ...ostala postojeća svojstva ostaju kako jesu... */
 }
 
 .metric-card:hover {
