@@ -43,7 +43,7 @@ class SingleRunResult:
     error: Optional[str] = None
 
 
-def normalize_url(url: str) -> str:
+def normalize_url(url: str):
     url = url.strip()
 
     if not url:
@@ -60,7 +60,7 @@ def normalize_url(url: str) -> str:
     return url
 
 
-def get_registered_domain(url: str) -> str:
+def get_registered_domain(url: str):
     parsed = urlparse(url)
 
     if not parsed.hostname:
@@ -74,14 +74,26 @@ def get_registered_domain(url: str) -> str:
     return parsed.hostname
 
 
-def is_third_party(request_url: str, page_url: str) -> bool:
+def is_third_party(request_url: str, page_url: str):
     request_domain = get_registered_domain(request_url)
     page_domain = get_registered_domain(page_url)
 
     if not request_domain or not page_domain:
         return False
 
-    return request_domain != page_domain
+    third_party = (request_domain != page_domain)
+
+    if third_party:
+        LOGGER.info(
+            "BLOCK  page=%s request=%s url=%s", page_domain, request_domain, request_url
+        )
+
+    else:
+        LOGGER.info(
+            "ALLOW  page=%s request=%s url=%s", page_domain, request_domain, request_url
+        )
+
+    return third_party
 
 
 class WebsiteMeasurementEngine:
@@ -118,7 +130,7 @@ class WebsiteMeasurementEngine:
             try:
                 baseline = self.measure_run(browser, normalized_url)
                 full_scroll = self.measure_run(browser, normalized_url, scroll_page=True)
-                without_third_party = self.measure_run(browser, normalized_url, block_third_party=True)
+                without_third_party = self.measure_run(browser, normalized_url, scroll_page=True, block_third_party=True)
             finally:
                 browser.close()
 
@@ -130,9 +142,6 @@ class WebsiteMeasurementEngine:
 
         if not without_third_party.success:
                     raise RuntimeError(without_third_party.error or f"Failed to measure without third-party resources for {normalized_url}")
-
-        optimizable_image_bytes = baseline.summary.get("images_optimizable_bytes", 0)
-        webp_bytes = baseline.summary.get("images_webp_bytes", 0)
 
         return {
             "url": normalized_url,
@@ -220,6 +229,8 @@ class WebsiteMeasurementEngine:
                 mark_network_activity()
                 return
 
+            record.completed = True
+
             try:
                 sizes = request.sizes()
                 request_body_size = max(0, int(sizes.get("requestBodySize", 0) or 0))
@@ -228,7 +239,6 @@ class WebsiteMeasurementEngine:
                 response_header_size = max(0,int(sizes.get("responseHeadersSize", 0) or 0))
 
                 record.transfer_bytes = request_body_size + request_header_size + response_body_size + response_header_size
-                record.completed = True
 
                 if record.resource_type == "image":
                     record.webp_bytes = self.measure_webp_size(request)
@@ -261,7 +271,7 @@ class WebsiteMeasurementEngine:
             wait_for_network_quiet()
 
             if scroll_page:
-                self.scroll_page(page)
+                self.scroll_page(page, wait_for_network_quiet)
                 wait_for_network_quiet()
 
             if main_response is None:
@@ -335,7 +345,7 @@ class WebsiteMeasurementEngine:
             return None
 
     @staticmethod
-    def scroll_page(page: Page):
+    def scroll_page(page: Page, wait_for_network_quiet):
         for _ in range(DEFAULT_MAX_SCROLLS):
             scroll_data = page.evaluate(
                 """
@@ -360,6 +370,7 @@ class WebsiteMeasurementEngine:
 
             if scroll_y + viewport_height >= document_height:
                 page.wait_for_timeout(DEFAULT_SCROLL_WAIT_MS)
+                wait_for_network_quiet()
 
                 new_document_height = page.evaluate(
                     """
@@ -375,6 +386,7 @@ class WebsiteMeasurementEngine:
 
             page.mouse.wheel(0, int(viewport_height * DEFAULT_SCROLL_STEP_RATIO))
             page.wait_for_timeout(DEFAULT_SCROLL_WAIT_MS)
+            wait_for_network_quiet()
 
     @staticmethod
     def collect_page_metrics(page: Page):
