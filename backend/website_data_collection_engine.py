@@ -14,7 +14,7 @@ logging.basicConfig(level=getattr(logging, "INFO"), format="%(levelname)s %(mess
 
 TRACKED_RESOURCE_TYPES = {"image", "script", "stylesheet", "font", "media"}
 
-DEFAULT_TIMEOUT_MS = 45000
+DEFAULT_TIMEOUT_MS = 180000
 DEFAULT_QUIET_WINDOW_MS = 1000
 DEFAULT_MAX_OBSERVATION_MS = 15000
 DEFAULT_POLL_INTERVAL_MS = 100
